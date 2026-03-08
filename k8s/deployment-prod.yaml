@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jfrog-demo-app-prod
+  labels:
+    app: jfrog-demo-app-prod
+    environment: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: jfrog-demo-app-prod
+  template:
+    metadata:
+      labels:
+        app: jfrog-demo-app-prod
+        environment: production
+    spec:
+      imagePullSecrets:
+      - name: jfrog-secret
+      containers:
+      - name: jfrog-demo-app
+        image: DOCKER_IMAGE_PLACEHOLDER
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: APP_VERSION
+          value: "1.0.0"
+        - name: ENVIRONMENT
+          value: "Production"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

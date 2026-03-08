@@ -1,0 +1,183 @@
+name: Phase 2 - Dev Build, Scan, and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  DEV_EKS_CLUSTER: jfrog-demo-cluster
+  JFROG_URL: https://trialh7v8xh.jfrog.io
+  JFROG_DOCKER_REGISTRY: trialh7v8xh.jfrog.io
+  DEV_REPO: docker-dev-local
+  PROD_REPO: docker-prod-local
+  IMAGE_NAME: jfrog-demo-app
+
+jobs:
+  build-and-push-to-jfrog:
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      high-cvss-count: ${{ steps.xray-scan.outputs.high-cvss-count }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Generate image metadata
+      id: meta
+      run: |
+        SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        IMAGE_TAG="${SHORT_SHA}-$(date +%s)"
+        echo "tags=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+        echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+    - name: Login to JFrog Artifactory
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.JFROG_DOCKER_REGISTRY }}
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_PASSWORD }}
+
+    - name: Build and push to JFrog Dev repository
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Install JFrog CLI
+      run: |
+        curl -fL https://install-cli.jfrog.io | sh
+        sudo mv jfrog /usr/local/bin/
+
+    - name: Configure JFrog CLI
+      run: |
+        jfrog config add jfrog-server \
+          --url=${{ env.JFROG_URL }} \
+          --access-token=${{ secrets.JFROG_ACCESS_TOKEN }} \
+          --interactive=false
+
+    - name: Scan image with Xray
+      id: xray-scan
+      run: |
+        echo "Scanning image for vulnerabilities..."
+        jfrog docker scan \
+          ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+          --server-id=jfrog-server \
+          --format=json > scan-results.json || true
+
+        cat scan-results.json
+
+        # Check for vulnerabilities with CVSS score >= 7.0
+        HIGH_CVSS_COUNT=$(jq '[.vulnerabilities[]? | select(.cvss_v3_score >= 7.0)] | length' scan-results.json 2>/dev/null || echo "0")
+        echo "Vulnerabilities with CVSS >= 7.0: $HIGH_CVSS_COUNT"
+        echo "high-cvss-count=$HIGH_CVSS_COUNT" >> $GITHUB_OUTPUT
+
+    - name: Upload scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: xray-scan-results
+        path: scan-results.json
+
+    - name: Check if safe for production promotion
+      id: promotion-check
+      run: |
+        if [ "${{ steps.xray-scan.outputs.high-cvss-count }}" -eq "0" ]; then
+          echo "safe-for-prod=true" >> $GITHUB_OUTPUT
+          echo "✅ No high-severity vulnerabilities. Image is safe for production promotion."
+        else
+          echo "safe-for-prod=false" >> $GITHUB_OUTPUT
+          echo "⚠️ High-severity vulnerabilities detected (CVSS >= 7.0). Promotion to production blocked."
+          echo "Image will still be deployed to Dev environment for testing."
+        fi
+
+  promote-to-prod:
+    runs-on: ubuntu-latest
+    needs: build-and-push-to-jfrog
+    if: needs.build-and-push-to-jfrog.outputs.high-cvss-count == '0'
+
+    steps:
+    - name: Install JFrog CLI
+      run: |
+        curl -fL https://install-cli.jfrog.io | sh
+        sudo mv jfrog /usr/local/bin/
+
+    - name: Configure JFrog CLI
+      run: |
+        jfrog config add jfrog-server \
+          --url=${{ env.JFROG_URL }} \
+          --access-token=${{ secrets.JFROG_ACCESS_TOKEN }} \
+          --interactive=false
+
+    - name: Promote image to production repository
+      run: |
+        IMAGE_TAG="${{ needs.build-and-push-to-jfrog.outputs.image-tag }}"
+
+        echo "Promoting image to production repository..."
+        # Copy from dev to prod repository
+        jfrog rt copy \
+          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
+          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
+          --server-id=jfrog-server
+
+        # Also promote the latest tag
+        jfrog rt copy \
+          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:latest" \
+          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:latest" \
+          --server-id=jfrog-server
+
+        echo "✅ Image promoted to production repository"
+        echo "🔔 JFrog webhook will trigger production deployment"
+
+  deploy-to-dev:
+    runs-on: ubuntu-latest
+    needs: build-and-push-to-jfrog
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig for Dev cluster
+      run: |
+        aws eks update-kubeconfig --name ${{ env.DEV_EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+    - name: Create JFrog pull secret in Dev cluster
+      run: |
+        kubectl create secret docker-registry jfrog-secret \
+          --docker-server=${{ env.JFROG_DOCKER_REGISTRY }} \
+          --docker-username=${{ secrets.JFROG_USERNAME }} \
+          --docker-password=${{ secrets.JFROG_PASSWORD }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Deploy to Dev EKS cluster
+      run: |
+        IMAGE_TAG="${{ needs.build-and-push-to-jfrog.outputs.image-tag }}"
+        # Deploy from dev repository to dev cluster
+        IMAGE="${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+
+        sed "s|DOCKER_IMAGE_PLACEHOLDER|${IMAGE}|g" k8s/deployment.yaml | kubectl apply -f -
+        kubectl apply -f k8s/service.yaml
+
+    - name: Wait for deployment
+      run: |
+        kubectl rollout status deployment/jfrog-demo-app
+
+    - name: Get Dev application URL
+      run: |
+        EXTERNAL_IP=$(kubectl get service jfrog-demo-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        echo "🚀 Application deployed successfully to Dev environment!"
+        echo "Dev Environment URL: http://$EXTERNAL_IP"

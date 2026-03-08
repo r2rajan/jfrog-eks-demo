@@ -1,0 +1,88 @@
+name: Phase 2 - Production Deployment
+
+on:
+  repository_dispatch:
+    types: [jfrog-promotion]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy'
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  PROD_EKS_CLUSTER: jfrog-demo-cluster-prod
+  JFROG_URL: https://trialh7v8xh.jfrog.io
+  JFROG_DOCKER_REGISTRY: trialh7v8xh.jfrog.io
+  PROD_REPO: docker-prod-local
+  IMAGE_NAME: jfrog-demo-app
+
+jobs:
+  deploy-to-production:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Parse webhook payload or manual input
+      id: image-info
+      run: |
+        if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+          IMAGE_TAG="${{ github.event.client_payload.tag }}"
+          echo "Webhook triggered deployment"
+        else
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          echo "Manual deployment triggered"
+        fi
+        echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+        echo "Deploying image tag: ${IMAGE_TAG}"
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig for Production cluster
+      run: |
+        aws eks update-kubeconfig --name ${{ env.PROD_EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+        kubectl config current-context
+
+    - name: Create JFrog pull secret in Production cluster
+      run: |
+        kubectl create secret docker-registry jfrog-secret \
+          --docker-server=${{ env.JFROG_DOCKER_REGISTRY }} \
+          --docker-username=${{ secrets.JFROG_USERNAME }} \
+          --docker-password=${{ secrets.JFROG_PASSWORD }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Deploy to Production EKS cluster
+      run: |
+        IMAGE_TAG="${{ steps.image-info.outputs.image-tag }}"
+        # Deploy from prod repository to prod cluster
+        IMAGE="${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+
+        echo "Deploying production image: ${IMAGE}"
+
+        sed "s|DOCKER_IMAGE_PLACEHOLDER|${IMAGE}|g" k8s/deployment-prod.yaml | kubectl apply -f -
+        kubectl apply -f k8s/service-prod.yaml
+
+    - name: Wait for production deployment
+      run: |
+        kubectl rollout status deployment/jfrog-demo-app-prod
+        echo "✅ Production deployment completed successfully!"
+
+    - name: Get Production application URL
+      run: |
+        EXTERNAL_IP=$(kubectl get service jfrog-demo-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        echo "🚀 Application deployed successfully to Production!"
+        echo "🌐 Production URL: http://$EXTERNAL_IP"
+
+    - name: Verify production deployment
+      run: |
+        EXTERNAL_IP=$(kubectl get service jfrog-demo-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        echo "Waiting for LoadBalancer to be ready..."
+        sleep 30
+        curl -f http://$EXTERNAL_IP/health || echo "Health check pending..."

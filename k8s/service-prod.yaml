@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jfrog-demo-app-prod
+  labels:
+    app: jfrog-demo-app-prod
+    environment: production
+spec:
+  type: LoadBalancer
+  selector:
+    app: jfrog-demo-app-prod
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
