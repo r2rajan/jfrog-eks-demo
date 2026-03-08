@@ -5,3 +5,8 @@ npm-debug.log
 *.log
 .aws-credentials-github
 claude.md
+.claude
+PROJECT_CONTEXT.md
+DEMO_SCRIPT.md
+conversation-backup-20260308.jsonl
+get-docker.sh
