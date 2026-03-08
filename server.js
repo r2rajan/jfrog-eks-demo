@@ -35,8 +35,9 @@ app.get('/', (req, res) => {
         <h1>🚀 GitHub + JFrog + AWS EKS Demo</h1>
         <p>Application is running successfully!</p>
         <div class="info">
+          <p><strong>Environment: ${process.env.ENVIRONMENT || 'Dev'}</strong></p>
           <p>Version: ${process.env.APP_VERSION || '1.0.0'}</p>
-          <p>Environment: ${process.env.NODE_ENV || 'development'}</p>
+          <p>Node Env: ${process.env.NODE_ENV || 'development'}</p>
         </div>
       </div>
     </body>

@@ -21,9 +21,11 @@ spec:
         - containerPort: 3000
         env:
         - name: NODE_ENV
-          value: "production"
+          value: "development"
         - name: APP_VERSION
           value: "1.0.0"
+        - name: ENVIRONMENT
+          value: "Dev"
         livenessProbe:
           httpGet:
             path: /health
