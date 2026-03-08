@@ -55,11 +55,10 @@ jobs:
     - name: Install JFrog CLI
       run: |
         curl -fL https://install-cli.jfrog.io | sh
-        sudo mv jfrog /usr/local/bin/
 
     - name: Configure JFrog CLI
       run: |
-        jfrog config add jfrog-server \
+        jf config add jfrog-server \
           --url=${{ env.JFROG_URL }} \
           --access-token=${{ secrets.JFROG_ACCESS_TOKEN }} \
           --interactive=false
@@ -68,7 +67,7 @@ jobs:
       id: xray-scan
       run: |
         echo "Scanning image for vulnerabilities..."
-        jfrog docker scan \
+        jf docker scan \
           ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
           --server-id=jfrog-server \
           --format=json > scan-results.json || true
@@ -107,11 +106,10 @@ jobs:
     - name: Install JFrog CLI
       run: |
         curl -fL https://install-cli.jfrog.io | sh
-        sudo mv jfrog /usr/local/bin/
 
     - name: Configure JFrog CLI
       run: |
-        jfrog config add jfrog-server \
+        jf config add jfrog-server \
           --url=${{ env.JFROG_URL }} \
           --access-token=${{ secrets.JFROG_ACCESS_TOKEN }} \
           --interactive=false
@@ -122,13 +120,13 @@ jobs:
 
         echo "Promoting image to production repository..."
         # Copy from dev to prod repository
-        jfrog rt copy \
+        jf rt copy \
           "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
           "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
           --server-id=jfrog-server
 
         # Also promote the latest tag
-        jfrog rt copy \
+        jf rt copy \
           "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:latest" \
           "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:latest" \
           --server-id=jfrog-server
