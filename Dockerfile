@@ -2,7 +2,7 @@ FROM node:18-alpine
 
 RUN apk add --no-cache build-base python3
 
-RUN npm install tar@latest
+RUN npm install -g tar@latest
 
 WORKDIR /app
 
