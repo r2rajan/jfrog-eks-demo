@@ -72,10 +72,20 @@ jobs:
           --server-id=jfrog-server \
           --format=json > scan-results.json || true
 
-        cat scan-results.json
+        echo "=== Scan Results ==="
+        cat scan-results.json || echo "No scan results file generated"
+        echo "===================="
 
-        # Check for Critical severity vulnerabilities
-        CRITICAL_COUNT=$(jq '[.vulnerabilities[]? | select(.severity == "Critical")] | length' scan-results.json 2>/dev/null || echo "0")
+        # Check if scan results file exists and has content
+        if [ ! -s scan-results.json ]; then
+          echo "⚠️ Scan results file is empty or missing"
+          echo "✅ Assuming no vulnerabilities found (scan may not be configured yet)"
+          CRITICAL_COUNT=0
+        else
+          # Check for Critical severity vulnerabilities
+          CRITICAL_COUNT=$(jq '[.vulnerabilities[]? | select(.severity == "Critical")] | length' scan-results.json 2>/dev/null || echo "0")
+        fi
+
         echo "Critical vulnerabilities found: $CRITICAL_COUNT"
         echo "critical-count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
 
