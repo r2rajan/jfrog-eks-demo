@@ -131,23 +131,16 @@ jobs:
         echo "Promoting image to production repository..."
         echo "Image tag: ${IMAGE_TAG}"
 
-        # Copy all Docker image layers and manifests from dev to prod
-        # Docker images are stored as: repository/image-name/tag/...
+        # Copy entire Docker image directory (all layers and manifests) from dev to prod
+        # Use ** to recursively copy all files
         jf rt copy \
-          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}/${IMAGE_TAG}/*" \
-          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}/${IMAGE_TAG}/" \
-          --flat=false \
-          --server-id=jfrog-server
-
-        # Also promote the latest tag
-        jf rt copy \
-          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}/latest/*" \
-          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}/latest/" \
+          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}/**" \
+          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}/" \
           --flat=false \
           --server-id=jfrog-server
 
         echo "✅ Image promoted to production repository"
-        echo "🔔 JFrog webhook will trigger production deployment"
+        echo "🔔 JFrog webhook should trigger production deployment"
 
   deploy-to-dev:
     runs-on: ubuntu-latest
