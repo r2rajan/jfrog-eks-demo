@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
-      high-cvss-count: ${{ steps.xray-scan.outputs.high-cvss-count }}
+      critical-count: ${{ steps.xray-scan.outputs.critical-count }}
 
     steps:
     - name: Checkout code
@@ -74,10 +74,10 @@ jobs:
 
         cat scan-results.json
 
-        # Check for vulnerabilities with CVSS score >= 7.0
-        HIGH_CVSS_COUNT=$(jq '[.vulnerabilities[]? | select(.cvss_v3_score >= 7.0)] | length' scan-results.json 2>/dev/null || echo "0")
-        echo "Vulnerabilities with CVSS >= 7.0: $HIGH_CVSS_COUNT"
-        echo "high-cvss-count=$HIGH_CVSS_COUNT" >> $GITHUB_OUTPUT
+        # Check for Critical severity vulnerabilities
+        CRITICAL_COUNT=$(jq '[.vulnerabilities[]? | select(.severity == "Critical")] | length' scan-results.json 2>/dev/null || echo "0")
+        echo "Critical vulnerabilities found: $CRITICAL_COUNT"
+        echo "critical-count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
 
     - name: Upload scan results
       uses: actions/upload-artifact@v4
@@ -88,19 +88,19 @@ jobs:
     - name: Check if safe for production promotion
       id: promotion-check
       run: |
-        if [ "${{ steps.xray-scan.outputs.high-cvss-count }}" -eq "0" ]; then
+        if [ "${{ steps.xray-scan.outputs.critical-count }}" -eq "0" ]; then
           echo "safe-for-prod=true" >> $GITHUB_OUTPUT
-          echo "✅ No high-severity vulnerabilities. Image is safe for production promotion."
+          echo "✅ No Critical vulnerabilities found. Image is safe for production promotion."
         else
           echo "safe-for-prod=false" >> $GITHUB_OUTPUT
-          echo "⚠️ High-severity vulnerabilities detected (CVSS >= 7.0). Promotion to production blocked."
+          echo "⚠️ Critical vulnerabilities detected! Promotion to production blocked."
           echo "Image will still be deployed to Dev environment for testing."
         fi
 
   promote-to-prod:
     runs-on: ubuntu-latest
     needs: build-and-push-to-jfrog
-    if: needs.build-and-push-to-jfrog.outputs.high-cvss-count == '0'
+    if: needs.build-and-push-to-jfrog.outputs.critical-count == '0'
 
     steps:
     - name: Install JFrog CLI
