@@ -129,16 +129,21 @@ jobs:
         IMAGE_TAG="${{ needs.build-and-push-to-jfrog.outputs.image-tag }}"
 
         echo "Promoting image to production repository..."
-        # Copy from dev to prod repository
+        echo "Image tag: ${IMAGE_TAG}"
+
+        # Copy all Docker image layers and manifests from dev to prod
+        # Docker images are stored as: repository/image-name/tag/...
         jf rt copy \
-          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
-          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" \
+          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}/${IMAGE_TAG}/*" \
+          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}/${IMAGE_TAG}/" \
+          --flat=false \
           --server-id=jfrog-server
 
         # Also promote the latest tag
         jf rt copy \
-          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:latest" \
-          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:latest" \
+          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}/latest/*" \
+          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}/latest/" \
+          --flat=false \
           --server-id=jfrog-server
 
         echo "✅ Image promoted to production repository"
