@@ -113,31 +113,34 @@ jobs:
     if: needs.build-and-push-to-jfrog.outputs.critical-count == '0'
 
     steps:
-    - name: Install JFrog CLI
-      run: |
-        curl -fL https://install-cli.jfrog.io | sh
-
-    - name: Configure JFrog CLI
-      run: |
-        jf config add jfrog-server \
-          --url=${{ env.JFROG_URL }} \
-          --access-token=${{ secrets.JFROG_ACCESS_TOKEN }} \
-          --interactive=false
+    - name: Login to JFrog Artifactory
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.JFROG_DOCKER_REGISTRY }}
+        username: ${{ secrets.JFROG_USERNAME }}
+        password: ${{ secrets.JFROG_PASSWORD }}
 
     - name: Promote image to production repository
       run: |
         IMAGE_TAG="${{ needs.build-and-push-to-jfrog.outputs.image-tag }}"
 
-        echo "Promoting image to production repository..."
+        echo "Promoting Docker image to production repository..."
         echo "Image tag: ${IMAGE_TAG}"
 
-        # Copy entire Docker image directory (all layers and manifests) from dev to prod
-        # Use ** to recursively copy all files
-        jf rt copy \
-          "${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}/**" \
-          "${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}/" \
-          --flat=false \
-          --server-id=jfrog-server
+        # Pull image from dev repository
+        docker pull ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+        docker pull ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:latest
+
+        # Tag for production repository
+        docker tag ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG} \
+                   ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+
+        docker tag ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.DEV_REPO }}/${{ env.IMAGE_NAME }}:latest \
+                   ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:latest
+
+        # Push to production repository
+        docker push ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+        docker push ${{ env.JFROG_DOCKER_REGISTRY }}/${{ env.PROD_REPO }}/${{ env.IMAGE_NAME }}:latest
 
         echo "✅ Image promoted to production repository"
         echo "🔔 JFrog webhook should trigger production deployment"
